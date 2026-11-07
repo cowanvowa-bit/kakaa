@@ -19,12 +19,31 @@ jobs:
       - name: Build
         run: |
           F=$(find . -name build.gradle -not -path './.git/*' | head -n1)
-          if [ -z "$F" ]; then echo "build.gradle not found in repo"; ls -R | head -50; exit 1; fi
+          if [ -z "$F" ]; then
+            Z=$(find . -maxdepth 2 -iname '*.zip' -not -path './.git/*' | head -n1)
+            if [ -n "$Z" ]; then
+              mkdir -p _proj
+              unzip -o "$Z" -d _proj
+              F=$(find _proj -name build.gradle | head -n1)
+            fi
+          fi
+          if [ -z "$F" ]; then
+            FILES=$(find . -not -path './.git/*' -type f | head -30 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=build.gradle not found::Files in repo:%0A$FILES"
+            exit 1
+          fi
           cd "$(dirname "$F")"
-          gradle build --no-daemon --stacktrace
+          set +e
+          gradle build --no-daemon --stacktrace > "$GITHUB_WORKSPACE/build.log" 2>&1
+          CODE=$?
+          if [ $CODE -ne 0 ]; then
+            MSG=$(grep -E 'error:|What went wrong|Could not' -A3 "$GITHUB_WORKSPACE/build.log" | head -30 | sed ':a;N;$!ba;s/\n/%0A/g')
+            if [ -z "$MSG" ]; then MSG=$(tail -20 "$GITHUB_WORKSPACE/build.log" | sed ':a;N;$!ba;s/\n/%0A/g'); fi
+            echo "::error title=Gradle build failed::$MSG"
+            exit $CODE
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Casino mod build ${{ github.run_number }}
           files: "**/build/libs/*.jar"
-          
